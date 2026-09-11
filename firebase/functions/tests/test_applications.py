@@ -80,4 +80,14 @@ def test_validate_own_template_file():
 def test_extension_for_content_type():
     assert applications.extension_for_content_type("application/pdf") == ".pdf"
     assert applications.extension_for_content_type("application/msword") == ".doc"
+    assert applications.extension_for_content_type("image/jpeg") == ".jpg"
     assert applications.extension_for_content_type("unknown/type") == ""
+
+
+def test_validate_merchant_signed_file():
+    assert applications.validate_merchant_signed_file("application/pdf", 1024) is None
+    assert applications.validate_merchant_signed_file("image/jpeg", 1024) is None
+    assert applications.validate_merchant_signed_file("image/png", 1024) is None
+    assert applications.validate_merchant_signed_file("application/msword", 1024) == "invalid_file_type"
+    assert applications.validate_merchant_signed_file("application/pdf", 0) == "file_too_large"
+    assert applications.validate_merchant_signed_file("application/pdf", applications.MAX_MERCHANT_FILE_BYTES + 1) == "file_too_large"

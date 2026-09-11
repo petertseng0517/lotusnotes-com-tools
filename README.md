@@ -360,7 +360,7 @@ venv32\Scripts\python.exe sync_all.py
 
 ## 功能六：特約商店線上申請（`store/`，見 `sdd5.md`）
 
-取代原本 `store/web/join.html` 純聯絡資訊頁的做法：店家在 `store/web/apply.html` 線上填表申請加入特約，可選「使用慈濟醫院合約範本」或直接上傳「店家制式範本」；職工福利小組用 `apply_review.py` 互動式審核（含 §4.10 統一編號真實性查證），核准後若為慈濟醫院範本，`generate_contracts.py` 會自動套版產生 PDF。**Phase 1、Phase 2 都已寫完並實測過**（Phase 2 目前只用假資料測過套版+PDF 產生，尚未接上真實申請走過部署後的完整流程），Phase 3（LINE 官方帳號身分綁定與用印檔案回傳）尚未實作，詳見 `sdd5.md` §6、§7。
+取代原本 `store/web/join.html` 純聯絡資訊頁的做法：店家在 `store/web/apply.html` 線上填表申請加入特約，可選「使用慈濟醫院合約範本」或直接上傳「店家制式範本」；職工福利小組用 `apply_review.py` 互動式審核（含 §4.10 統一編號真實性查證），核准後若為慈濟醫院範本，`generate_contracts.py` 會自動套版產生 PDF；核准後店家可加入 LINE 官方帳號完成身分核對，之後用印完成直接在 LINE 傳回掃描檔即可，不用寄 Email。**Phase 1、Phase 2 已部署到正式環境並用真實申請資料驗收通過**；**Phase 3（LINE 官方帳號身分綁定與用印檔案回傳）程式碼已寫完，但尚未部署也尚未實測**——需要先到 LINE Developers Console 取得「花蓮職工福利行政小組」Messaging API 頻道的憑證並設定 Webhook URL，詳見 `sdd5.md` §6 第 10 項、§7。
 
 ```powershell
 # 部署 apply.html / apply_status.html 到 Ubuntu 網站伺服器
@@ -385,9 +385,33 @@ venv32\Scripts\python.exe store\generate_contracts.py
 STORE_PUBLIC_BASE_URL=https://hlm.tzuchi.com.tw/store
 ```
 
-**Cloud Functions 新增端點**（`firebase/functions/main.py`）：`apply`（公開，店家送出申請）、`application_status`（公開，查詢進度）、`download_file`（公開＋admin，下載店家自有合約書）、`admin_list_applications`／`admin_review_application`／`admin_mark_contract_ready`（admin-only，分別給 `apply_review.py`／`generate_contracts.py` 呼叫）。這是本專案第一次用到 **Firebase Storage**（店家上傳的自有合約書存在這裡，bucket 規則整個鎖死，只有 Admin SDK 能讀寫），`firebase/functions/.env` 需新增 `STORAGE_BUCKET_NAME`（原本想叫 `FIREBASE_STORAGE_BUCKET`，但 `firebase deploy` 會拒絕 `.env` 裡以 `FIREBASE_` 開頭的變數名稱，實測部署失敗才改名）。
+**Cloud Functions 新增端點**（`firebase/functions/main.py`）：`apply`（公開，店家送出申請）、`application_status`（公開，查詢進度）、`download_file`（公開＋admin，下載店家自有合約書／用印回傳掃描檔）、`admin_list_applications`／`admin_review_application`／`admin_mark_contract_ready`／`admin_update_status`（admin-only，分別給 `apply_review.py`／`generate_contracts.py` 呼叫）、`line_webhook`（公開但驗證 LINE 簽章，處理店家 LINE 身分綁定與用印檔案接收，見下方）。這是本專案第一次用到 **Firebase Storage**（店家上傳的自有合約書、LINE 回傳的用印掃描檔都存在這裡，bucket 規則整個鎖死，只有 Admin SDK 能讀寫），`firebase/functions/.env` 需新增 `STORAGE_BUCKET_NAME`（原本想叫 `FIREBASE_STORAGE_BUCKET`，但 `firebase deploy` 會拒絕 `.env` 裡以 `FIREBASE_` 開頭的變數名稱，實測部署失敗才改名）。
 
 **統一編號查證的已知限制**（`store/tax_id_lookup.py`，見 `sdd5.md` §4.10、§6）：「統編查公司名稱」（公司登記）實測免申請即可用；「商業統一編號查商號名稱」（商業/商號登記，特約商店裡更常見的類型）實測需要向經濟部申請 IP 白名單才能用，這台機器目前還沒申請，`apply_review.py` 審核時會清楚顯示「查證功能未開通」，不會誤判成「查無登記資料」。
+
+### LINE 官方帳號身分綁定與用印回傳（`line_webhook`，尚未部署）
+
+店家核准後加入「花蓮職工福利行政小組」LINE 官方帳號，在聊天視窗輸入「申請編號 查詢碼」完成身分核對，之後直接在同一個對話傳回用印完成的掃描檔即可，不用寄 Email——詳見 `sdd5.md` §4.7、§4.8。
+
+```powershell
+# 職工福利小組人工核對店家回傳的用印檔案，確認後標記完成
+venv32\Scripts\python.exe store\apply_review.py --status merchant_signed
+
+# 把指定申請標記為放棄/不予受理
+venv32\Scripts\python.exe store\apply_review.py --abandon 20260909-03
+```
+
+**部署前必須先到 LINE Developers Console 完成設定**（這是本專案第一次要用到 Messaging API 的 webhook 接收模式，`sdd3.md`/`sdd4.md` 只用 LIFF + push）：
+1. 確認「花蓮職工福利行政小組」這個 LINE 官方帳號有啟用 Messaging API。
+2. 該 Channel 的「Messaging API」分頁取得 **Channel Secret**、產生 **Channel Access Token**——這兩組是全新憑證，跟 `sdd3.md` 既有的 `LINE_LOGIN_CHANNEL_ID`（LIFF 登入用）、根目錄 `.env` 的 `LINE_CHANNEL_TOKEN`（功能一打卡通知用，不同的 LINE 帳號）都不是同一組，不能混用，設成 Cloud Functions 的 secret：
+   ```powershell
+   firebase functions:secrets:set LINE_CHANNEL_SECRET
+   firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN
+   ```
+3. Webhook URL 設成 `line_webhook` 部署後的網址，並開啟「Use webhook」。
+4. 建議關閉 LINE 官方帳號內建的「自動回應訊息」「加入好友的歡迎訊息」，避免跟 `line_webhook` 自己的回覆邏輯衝突。
+
+**新增 Firestore collection**：`merchantLineAuth`（身分綁定）、`merchantBindAttempts`（防暴力猜測節流，跟 `codeAttempts` 同一套精神）。
 
 ---
 

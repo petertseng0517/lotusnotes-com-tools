@@ -59,7 +59,14 @@ _OWN_TEMPLATE_EXTENSIONS = {
     "application/pdf": ".pdf",
     "application/msword": ".doc",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
 }
+
+# 店家透過 LINE 傳回的用印掃描檔限制（sdd5.md §4.7、§5），比自有合約書上傳寬鬆一點
+# （多接受圖片格式、大小上限也比較大，因為手機直接拍照上傳很常見）。
+ALLOWED_MERCHANT_FILE_CONTENT_TYPES = {"application/pdf", "image/jpeg", "image/png"}
+MAX_MERCHANT_FILE_BYTES = 20 * 1024 * 1024
 
 # 查詢碼：排除容易看錯/唸錯的字元（0/O、1/I/L），跟 codes.py 的驗證碼同一套考量。
 QUERY_CODE_ALPHABET = "".join(c for c in string.ascii_uppercase + string.digits if c not in "0O1IL")
@@ -79,6 +86,15 @@ def validate_own_template_file(content_type: str, size: int) -> str | None:
     if content_type not in ALLOWED_OWN_TEMPLATE_CONTENT_TYPES:
         return "invalid_file_type"
     if size <= 0 or size > MAX_OWN_TEMPLATE_BYTES:
+        return "file_too_large"
+    return None
+
+
+def validate_merchant_signed_file(content_type: str, size: int) -> str | None:
+    """回傳 None 表示通過，否則回傳錯誤代碼。"""
+    if content_type not in ALLOWED_MERCHANT_FILE_CONTENT_TYPES:
+        return "invalid_file_type"
+    if size <= 0 or size > MAX_MERCHANT_FILE_BYTES:
         return "file_too_large"
     return None
 
@@ -212,6 +228,35 @@ def mark_contract_ready(db: firestore.Client, application_id: str, contract_url:
         "contractGeneratedAt": firestore.SERVER_TIMESTAMP,
     })
     return {"ok": True, "status": STATUS_CONTRACT_READY}
+
+
+def update_status(
+    db: firestore.Client,
+    application_id: str,
+    status: str,
+    final_doc_url: str | None = None,
+) -> dict:
+    """通用狀態轉換（sdd5.md §4.8），只給 merchant_signed／completed／abandoned 這幾個
+    純人工判斷（或店家不便用 LINE 時的備援管道，見 §4.8「例外情況」）的轉換用，不檢查
+    狀態機合法性以外的規則——`line_webhook` 收到檔案時走 merchant_binding.receive_file()
+    自動轉 merchant_signed，不會呼叫這裡。"""
+    if status not in (STATUS_MERCHANT_SIGNED, STATUS_COMPLETED, STATUS_ABANDONED):
+        return {"ok": False, "error": "invalid_status"}
+
+    ref = db.collection("storeApplications").document(application_id)
+    if not ref.get().exists:
+        return {"ok": False, "error": "not_found"}
+
+    update = {"status": status}
+    if status == STATUS_MERCHANT_SIGNED:
+        update["merchantSignedAt"] = firestore.SERVER_TIMESTAMP
+    elif status == STATUS_COMPLETED:
+        update["completedAt"] = firestore.SERVER_TIMESTAMP
+        if final_doc_url:
+            update["finalDocUrl"] = final_doc_url
+
+    ref.update(update)
+    return {"ok": True, "status": status}
 
 
 def list_applications(db: firestore.Client, status: str | None = None) -> list[dict]:

@@ -14,6 +14,8 @@ Cloud Functions（2nd gen, Python）進入點。sdd3.md §5 存取控制的後�
   admin_list_applications   admin-only，本機 apply_review.py 呼叫
   admin_review_application  admin-only，本機 apply_review.py 呼叫
   admin_mark_contract_ready admin-only，本機 generate_contracts.py 呼叫（sdd5.md §4.5.1）
+  admin_update_status        admin-only，本機 apply_review.py 呼叫（sdd5.md §4.8）
+  line_webhook                公開，但需驗證 LINE 簽章，店家 LINE 官方帳號 webhook（sdd5.md §4.7）
 
 安全模型（見 sdd3.md §5 實作計畫「架構總覽」）：
 - 這裡是唯一會碰 Firestore／Storage 的地方，前端/本機都不直接用相關 SDK。
@@ -25,17 +27,21 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import time
 
 import requests
 from firebase_admin import firestore, initialize_app
 from firebase_functions import https_fn, options
 
 import applications
+import line_messaging
+import merchant_binding
 import rate_limit
 import storage_utils
 from admin_auth import is_authorized
 from codes import check_and_consume_code, generate_and_activate_code
 from line_auth import LineVerifyError, verify_line_id_token
+from line_webhook_auth import verify_signature as verify_line_webhook_signature
 from roster_match import compute_revocations
 
 initialize_app()
@@ -310,9 +316,9 @@ def application_status(req: https_fn.Request) -> https_fn.Response:
 @https_fn.on_request(cors=_PUBLIC_CORS, secrets=["ADMIN_SHARED_SECRET"])
 def download_file(req: https_fn.Request) -> https_fn.Response:
     """
-    店家自有合約書下載（sdd5.md §4.5.2）。這是本設計裡 Firebase Storage 檔案唯一的
-    對外出口——bucket 規則整個鎖死，一律經這裡的 Admin SDK 讀取，存取權限判斷在
-    這裡做，不是靠 Storage 規則本身。
+    Firebase Storage 檔案唯一的對外出口——店家自有合約書（sdd5.md §4.5.2）跟店家
+    透過 LINE 回傳的用印掃描檔（sdd5.md §4.7、§4.8）都存在 Storage，bucket 規則整個
+    鎖死，一律經這裡的 Admin SDK 讀取，存取權限判斷在這裡做，不是靠 Storage 規則本身。
 
     兩種呼叫者，任一通過即可：
       - 申請人自己：帶 applicationId + queryCode（跟 application_status 同一套驗證）
@@ -320,7 +326,8 @@ def download_file(req: https_fn.Request) -> https_fn.Response:
     """
     application_id = (req.args.get("applicationId") or "").strip()
     kind = (req.args.get("kind") or "").strip()
-    if kind != "own_template":
+    storage_field = {"own_template": "ownTemplateStoragePath", "merchant_signed": "merchantSignedFileUrl"}.get(kind)
+    if not storage_field:
         return _json_response({"ok": False, "error": "unsupported_kind"}, 400)
 
     application = applications.get_application(_db(), application_id)
@@ -332,7 +339,7 @@ def download_file(req: https_fn.Request) -> https_fn.Response:
     if not authorized:
         return _json_response({"ok": False, "error": "not_found"}, 404)
 
-    storage_path = application.get("ownTemplateStoragePath")
+    storage_path = application.get(storage_field)
     if not storage_path:
         return _json_response({"ok": False, "error": "not_found"}, 404)
 
@@ -394,3 +401,110 @@ def admin_review_application(req: https_fn.Request) -> https_fn.Response:
         _db(), application_id, decision, review_note, contract_start_date, contract_end_date
     )
     return _json_response(result, 200 if result.get("ok") else 400)
+
+
+@https_fn.on_request(secrets=["ADMIN_SHARED_SECRET"])
+def admin_update_status(req: https_fn.Request) -> https_fn.Response:
+    """通用狀態轉換端點，供 merchant_signed／completed／abandoned 這幾個純人工判斷
+    的狀態轉換使用（sdd5.md §4.8）。"""
+    if not is_authorized(req.headers):
+        return _json_response({"ok": False, "error": "unauthorized"}, 401)
+
+    body = req.get_json(silent=True) or {}
+    application_id = (body.get("applicationId") or "").strip()
+    status = (body.get("status") or "").strip()
+    final_doc_url = (body.get("finalDocUrl") or "").strip() or None
+
+    if not application_id or not status:
+        return _json_response({"ok": False, "error": "missing_fields"}, 400)
+
+    result = applications.update_status(_db(), application_id, status, final_doc_url)
+    return _json_response(result, 200 if result.get("ok") else 400)
+
+
+def _handle_line_event(db, event: dict) -> None:
+    """處理單一 LINE webhook 事件（sdd5.md §4.7）。只處理 message 事件，follow／
+    貼圖等其他事件一律忽略（見 §4.7 步驟④）。"""
+    if event.get("type") != "message":
+        return
+
+    line_user_id = (event.get("source") or {}).get("userId")
+    if not line_user_id:
+        return
+
+    reply_token = event.get("replyToken")
+    message = event.get("message") or {}
+    message_type = message.get("type")
+
+    binding = merchant_binding.get_binding(db, line_user_id)
+
+    if binding is None:
+        if message_type != "text":
+            line_messaging.reply_text(
+                reply_token,
+                "請先輸入您的申請編號與查詢碼完成身分核對，才能傳送用印檔案"
+                "（例如：20260909-03 AB12CD34）。",
+            )
+            return
+
+        result = merchant_binding.try_bind(db, line_user_id, message.get("text", ""))
+        if result["result"] == "bound":
+            line_messaging.reply_text(
+                reply_token, f"已確認您是「{result['storeName']}」，之後可以直接在這裡傳回用印檔案。"
+            )
+        elif result["result"] == "locked":
+            line_messaging.reply_text(reply_token, "輸入錯誤次數過多，已暫時鎖定，請稍後再試。")
+        elif result["result"] == "bad_format":
+            line_messaging.reply_text(
+                reply_token,
+                "格式不正確，請輸入「申請編號 查詢碼」，中間用空白分開（例如：20260909-03 AB12CD34）。",
+            )
+        else:
+            line_messaging.reply_text(reply_token, "申請編號或查詢碼不正確，請重新輸入。")
+        return
+
+    application_id = binding["applicationId"]
+
+    if message_type not in ("file", "image"):
+        line_messaging.reply_text(reply_token, "已確認您的身分，如需傳回用印檔案，請直接傳送圖片或檔案即可。")
+        return
+
+    content = line_messaging.download_content(str(message.get("id", "")))
+    if content is None:
+        line_messaging.reply_text(reply_token, "檔案下載失敗，請稍後再試一次。")
+        return
+
+    file_bytes, content_type = content
+    file_error = applications.validate_merchant_signed_file(content_type, len(file_bytes))
+    if file_error:
+        line_messaging.reply_text(reply_token, "檔案格式或大小不符（僅接受 PDF/圖片，20MB 以內），請重新傳送。")
+        return
+
+    ext = applications.extension_for_content_type(content_type)
+    storage_path = f"merchant-uploads/{application_id}/{int(time.time())}{ext}"
+    storage_utils.upload_bytes(storage_path, file_bytes, content_type)
+    merchant_binding.receive_file(db, application_id, storage_path)
+    line_messaging.reply_text(reply_token, "已收到您回傳的用印檔案，職工福利小組確認後會盡快與您聯繫後續。")
+
+
+@https_fn.on_request(secrets=["LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN"])
+def line_webhook(req: https_fn.Request) -> https_fn.Response:
+    """
+    店家 LINE 官方帳號 webhook（sdd5.md §4.7）。這是本專案第一次處理 LINE webhook
+    （follow/message 事件），跟 sdd3.md/sdd4.md 既有的 LIFF + push 模式是不同的
+    技術路徑，用的也是不同的憑證（LINE_CHANNEL_SECRET／LINE_CHANNEL_ACCESS_TOKEN，
+    不是 LINE_LOGIN_CHANNEL_ID）。
+    """
+    body = req.get_data()
+    signature = req.headers.get("X-Line-Signature", "")
+    channel_secret = os.environ.get("LINE_CHANNEL_SECRET", "")
+    if not verify_line_webhook_signature(channel_secret, body, signature):
+        print("line_webhook: invalid signature")
+        return _json_response({"ok": False, "error": "invalid_signature"}, 400)
+
+    payload = req.get_json(silent=True) or {}
+    db = _db()
+    for event in payload.get("events", []):
+        _handle_line_event(db, event)
+
+    return _json_response({"ok": True})

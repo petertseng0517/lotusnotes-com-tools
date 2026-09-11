@@ -1,10 +1,15 @@
 """
-互動式審核特約商店線上申請（sdd5.md §3、§4.4、§4.10）。
-用法: python apply_review.py [--status pending]
+互動式審核特約商店線上申請（sdd5.md §3、§4.4、§4.7、§4.8、§4.10）。
+用法:
+    python apply_review.py                     # 審核 status=pending 的申請
+    python apply_review.py --status merchant_signed  # 處理店家已用印回傳、待人工蓋院方大小章的申請
+    python apply_review.py --status approved   # 純瀏覽（例如看目前卡在等套版的申請）
+    python apply_review.py --abandon 20260909-03     # 把指定申請標記為放棄/不予受理
 
-預設列出 status=pending 的申請逐筆審核；也可以指定其他狀態單純瀏覽
-（例如 --status approved 看目前卡在等套版的申請），這種情況只會列出清單，
-不會出現審核提示。
+`--status pending` 時逐筆審核；`--status merchant_signed` 時逐筆提示是否要
+下載檢查店家回傳的用印檔案、確認流程做完（列印、蓋院方大小章、掃描、透過 LINE
+Official Account Manager 手動傳回最終檔案給店家）後標記完成；其他狀態單純列出
+清單，不出現互動提示。
 
 核准「使用店家制式範本」的申請前，會先下載店家上傳的合約書並用作業系統預設的
 關聯程式開啟，讓你人工看內容（比照本專案其他地方假設 Windows 環境的做法）。
@@ -14,6 +19,10 @@
 輸入別的日期覆蓋）。核准後這筆申請會停在 approved，等 Phase 2 的
 generate_contracts.py 接手套版產生 PDF；「使用店家制式範本」核准後會直接變成
 contract_ready，因為合約內容就是店家自己上傳的那份，沒有套版這個動作。
+
+店家透過 LINE 官方帳號傳回用印掃描檔後（sdd5.md §4.7），狀態會自動變成
+merchant_signed，不需要在這裡手動標記——這裡負責的是「人工核對用印是否齊全
+之後」的後續動作。
 """
 import argparse
 import os
@@ -83,16 +92,18 @@ def submit_review(application_id: str, decision: str, review_note: str,
     return result
 
 
-def open_own_template_file(application_id: str):
+def open_remote_file(application_id: str, kind: str):
+    """kind 是 "own_template"（店家自有合約書）或 "merchant_signed"（店家用印回傳
+    的掃描檔），見 main.py download_file 端點。"""
     resp = requests.get(
         f"{FUNCTIONS_BASE_URL}/download_file",
-        params={"applicationId": application_id, "kind": "own_template"},
+        params={"applicationId": application_id, "kind": kind},
         headers=HEADERS,
         timeout=30,
         verify=False,
     )
     if resp.status_code != 200:
-        print(f"下載店家上傳的合約書失敗（HTTP {resp.status_code}）：{resp.text}")
+        print(f"下載檔案失敗（HTTP {resp.status_code}）：{resp.text}")
         return
 
     ext = CONTENT_TYPE_EXT.get(resp.headers.get("Content-Type", ""), "")
@@ -100,11 +111,31 @@ def open_own_template_file(application_id: str):
         tmp.write(resp.content)
         tmp_path = tmp.name
 
-    print(f"已下載店家上傳的合約書：{tmp_path}")
+    print(f"已下載檔案：{tmp_path}")
     try:
         os.startfile(tmp_path)
     except OSError as e:
         print(f"無法自動開啟檔案，請自行手動開啟上面的路徑（{e}）")
+
+
+def submit_update_status(application_id: str, status: str, final_doc_url: str = None) -> dict:
+    body = {"applicationId": application_id, "status": status}
+    if final_doc_url:
+        body["finalDocUrl"] = final_doc_url
+    resp = requests.post(
+        f"{FUNCTIONS_BASE_URL}/admin_update_status",
+        json=body,
+        headers=HEADERS,
+        timeout=30,
+        verify=False,
+    )
+    try:
+        result = resp.json()
+    except ValueError:
+        result = {"ok": False, "error": resp.text}
+    if resp.status_code != 200:
+        print(f"狀態更新失敗（HTTP {resp.status_code}）：{result}")
+    return result
 
 
 def default_contract_dates() -> tuple:
@@ -136,7 +167,7 @@ def review_pending(app: dict):
 
     if app["contractSource"] == "own_template":
         print("這筆是「使用店家制式範本」，先下載店家上傳的合約書供你人工檢查內容...")
-        open_own_template_file(app["applicationId"])
+        open_remote_file(app["applicationId"], "own_template")
 
     decision = input("核准請按 a，婉拒請按 r，跳過請直接按 Enter：").strip().lower()
     if decision not in ("a", "r"):
@@ -161,10 +192,35 @@ def review_pending(app: dict):
     print(f"已核准：{result}")
 
 
+def review_merchant_signed(app: dict):
+    """店家已透過 LINE 傳回用印掃描檔，狀態自動變成 merchant_signed（sdd5.md §4.7）；
+    這裡處理的是人工核對之後的動作（sdd5.md §4.8）：列印、蓋院方大小章、掃描、
+    透過 LINE Official Account Manager 手動傳回最終檔案給店家，都是這支腳本管不到
+    的實體動作，這裡只負責在你都做完之後把狀態標記成 completed。"""
+    print_application(app)
+
+    action = input("查看店家回傳的用印檔案請按 v，確認流程都做完了請按 c，跳過請直接按 Enter：").strip().lower()
+    if action == "v":
+        open_remote_file(app["applicationId"], "merchant_signed")
+        action = input("確認流程都做完了（列印、蓋院方大小章、掃描、已透過 LINE 傳回最終檔案給店家）請按 c，跳過請直接按 Enter：").strip().lower()
+
+    if action != "c":
+        print("已跳過")
+        return
+
+    result = submit_update_status(app["applicationId"], "completed")
+    print(f"已標記完成：{result}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--status", default="pending", help="要列出的申請狀態（預設 pending）")
+    parser.add_argument("--abandon", metavar="APPLICATION_ID", help="把指定申請標記為 abandoned（放棄/不予受理），不會進入其他審核流程")
     args = parser.parse_args()
+
+    if args.abandon:
+        print(f"已標記為 abandoned：{submit_update_status(args.abandon, 'abandoned')}")
+        return
 
     apps = fetch_applications(args.status)
     if not apps:
@@ -173,15 +229,17 @@ def main():
 
     print(f"共 {len(apps)} 筆狀態為「{args.status}」的申請")
 
-    if args.status != "pending":
+    if args.status == "pending":
+        for app in apps:
+            review_pending(app)
+        print("審核完畢")
+    elif args.status == "merchant_signed":
+        for app in apps:
+            review_merchant_signed(app)
+        print("處理完畢")
+    else:
         for app in apps:
             print_application(app)
-        return
-
-    for app in apps:
-        review_pending(app)
-
-    print("審核完畢")
 
 
 if __name__ == "__main__":
