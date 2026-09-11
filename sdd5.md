@@ -2,11 +2,11 @@
 
 規格驅動開發文件。設計「店家線上申請加入特約 → 職工福利小組審核 → 系統自動套版產生合約 PDF → 雙方用印往返 → 結案」的完整流程，取代現行 `store/web/join.html` 純聯絡資訊頁的做法。
 
-**實作現況（2026-09-09）**：
+**實作現況（2026-09-11）**：
 
-- **Phase 1（表單送出 + Firestore 儲存 + 審核 + 統一編號查證）已寫完程式碼**——`store/web/apply.html`／`apply_status.html`、`firebase/functions/main.py` 新增的 `apply`／`application_status`／`download_file`／`admin_list_applications`／`admin_review_application`、`store/apply_review.py`、`store/tax_id_lookup.py`、`store/deploy_apply.py`。純邏輯部分已有單元測試（`firebase/functions/tests/test_applications.py`）且全數通過。
-- **Phase 2（自動套版產生 PDF）已寫完並實測通過**——`store/prepare_contract_template.py`（一次性把 `store/template-store.doc` 轉成含 `{{...}}` 佔位符的 `store/templates/contract_template.doc`，已用 Word COM 精準鎖定段落範圍實際跑過，重新打開輸出檔案逐段落核對過內容跟表格結構都正確）、`store/generate_contracts.py`（套版+匯出 PDF，已用假資料實際產生過一份 PDF，內容跟版面完全正確——甲乙雙方欄位、優惠內容、合約起訖日西元轉民國、簽約日期、第 2 頁附件1 都對，唯一的小地方是原範本「止」字前面的空白讓那個字自動換到下一行，純排版小瑕疵，不影響內容），另外新增了 `admin_mark_contract_ready` 端點。**尚未實際部署到 Firebase 正式環境、也還沒對真實送出的申請跑過完整流程**（無法在本機直接跑 `firebase deploy`，見下方限制），部署後需要照 §7 驗收標準用真實申請資料實測一次。
-- Phase 3（LINE 官方帳號身分綁定與用印回傳）尚未實作。
+- **Phase 1、Phase 2 已完整實作並在正式環境驗收通過**——`store/web/apply.html`／`apply_status.html` 已部署上線，Cloud Functions（`apply`／`application_status`／`download_file`／`admin_list_applications`／`admin_review_application`／`admin_mark_contract_ready`）已部署到 `hlwelfare` 專案，`store/prepare_contract_template.py`／`generate_contracts.py` 已用真實申請資料跑過一次完整流程（送出申請 → 審核核准 → 套版產生 PDF → 上傳 → 查詢下載，兩種合約來源都測過），詳見 §7 驗收標準勾選狀態。純邏輯單元測試（`firebase/functions/tests/test_applications.py`）全數通過。
+- **首次部署踩到的坑**（已修正，供之後參考）：`.env` 的環境變數名稱不能叫 `FIREBASE_STORAGE_BUCKET`——`firebase deploy` 會拒絕 `.env` 裡任何以 `FIREBASE_`／`X_GOOGLE_`／`EXT_`／`KIT_` 開頭的變數名稱（保留字首），已改名為 `STORAGE_BUCKET_NAME`。另外 `generate_contracts.py` 需要的 `STORE_PUBLIC_BASE_URL`（組合約 PDF 對外網址用）第一次忘了同步加進根目錄 `.env`，已補上。
+- Phase 3（LINE 官方帳號身分綁定與用印回傳）尚未實作，見下方設計進行開發。
 
 ---
 
@@ -306,22 +306,22 @@ flowchart TD
 ## 7. 驗收標準
 
 **表單與申請資料（第一階段）**
-- [ ] 店家可在 `apply.html` 送出申請，必要欄位（含統一編號格式）在前後端都有驗證
-- [ ] 送出成功會產生唯一 `applicationId` + `queryCode`，並清楚提示申請人記下
-- [ ] 蜜罐欄位非空時靜默拒絕（不寫入 Firestore，仍回應成功畫面避免透露防線）
-- [ ] 單一 IP 超過每日上限次數會被拒絕（429）
-- [ ] 職工福利小組可用 `apply_review.py` 列出待審核清單、核准或婉拒並填寫理由
-- [ ] 選擇「使用店家制式範本」時，表單可正確上傳檔案並跟其他欄位一起送出，`ownTemplateFileUrl` 正確寫入
-- [ ] 上傳的自有合約書檔案類型/大小超出限制時會被拒絕
-- [ ] 審核時可查到統一編號對應的政府登記名稱（公司或商業擇一查到即顯示），查無資料時清楚顯示「查無登記資料」而不是誤判成錯誤或擋件
+- [x] 店家可送出申請，必要欄位（含統一編號格式）在後端有驗證——**已對正式環境的 `apply` 端點實測**兩種合約來源（JSON／multipart）都能正確送出並擋掉不合法欄位；`apply.html` 網頁本身尚未有人實際用瀏覽器點過一輪（後端邏輯已確認正確）
+- [x] 送出成功會產生唯一 `applicationId` + `queryCode`（實測：`20260911-01`／`02`／`03`）
+- [ ] 蜜罐欄位非空時靜默拒絕（不寫入 Firestore，仍回應成功畫面避免透露防線）——尚未實測
+- [ ] 單一 IP 超過每日上限次數會被拒絕（429）——尚未實測
+- [ ] 職工福利小組可用 `apply_review.py` 列出待審核清單、核准或婉拒並填寫理由——**它呼叫的 `admin_list_applications`／`admin_review_application` 端點已直接實測正確**，但 `apply_review.py` 這支互動式 CLI 腳本本身還沒有人實際跑過一次
+- [x] 選擇「使用店家制式範本」時，表單可正確上傳檔案並跟其他欄位一起送出，`ownTemplateStoragePath` 正確寫入（實測：`20260911-03`）
+- [ ] 上傳的自有合約書檔案類型/大小超出限制時會被拒絕——尚未實測
+- [x] 審核時可查到統一編號對應的政府登記名稱（公司或商業擇一查到即顯示），查無資料/查證功能未開通時清楚顯示對應訊息而不是誤判成錯誤或擋件——已用真實統編對 `store/tax_id_lookup.py` 實測過（見 §4.10）
 
 **合約套版與下載（第二階段）**
-- [x] `generate_contracts.py` 可正確把已核准申請（`contractSource == "hospital_template"`）的資料套進合約範本，產生格式正確的 PDF——**已用假資料實測**（欄位、優惠內容、合約起訖日西元轉民國、簽約日期、第 2 頁附件1 都正確），**尚未接上真實已核准申請＋部署後的 Cloud Functions 走過一次完整流程**
-- [ ] PDF 可透過 SSH/SCP 正確上傳到 Ubuntu 伺服器的隨機路徑，目錄列表回 403（程式邏輯沿用既有 deploy_liff.py 的做法，尚未實際對正式站跑過）
-- [ ] `contractSource == "own_template"` 的申請一經核准，`contractUrl` 立即等於 `ownTemplateStoragePath`、狀態直接變 `contract_ready`，不會誤跑套版流程
-- [ ] 申請人用 `applicationId` + `queryCode` 可在 `apply_status.html` 查到「合約已產生」並下載（兩種合約來源皆可）
-- [ ] 查詢碼錯誤时一律回「查無資料」，不透露是編號錯還是碼錯
-- [ ] 職工福利小組可標記「店家已回傳用印」「雙方用印完成」，並記錄最終檔案下載網址（選填）
+- [x] `generate_contracts.py` 可正確把已核准申請（`contractSource == "hospital_template"`）的資料套進合約範本，產生格式正確的 PDF——**已對正式環境用真實送出並核准的申請（`20260911-02`）跑過一次完整流程**，下載下來核對過內容跟版面都正確
+- [x] PDF 可透過 SSH/SCP 正確上傳到 Ubuntu 伺服器的隨機路徑，目錄列表回 403——已實測（PDF 本身回 200，`contracts/` 目錄列表回 403）
+- [x] `contractSource == "own_template"` 的申請一經核准，`contractUrl` 立即等於 `ownTemplateStoragePath`、狀態直接變 `contract_ready`，不會誤跑套版流程——已實測
+- [x] 申請人用 `applicationId` + `queryCode` 可在 `apply_status.html`（背後的 `application_status`／`download_file` 端點）查到「合約已產生」並下載（兩種合約來源皆可）——已實測，`apply_status.html` 網頁本身尚未有人實際點過
+- [x] 查詢碼錯誤时一律回「查無資料」，不透露是編號錯還是碼錯——已實測（`application_status`、`download_file` 都測過）
+- [ ] 職工福利小組可標記「店家已回傳用印」「雙方用印完成」，並記錄最終檔案下載網址（選填）——這幾個狀態轉換屬於 §4.7/§4.8（第三階段）範圍，`admin_update_status` 端點尚未實作
 
 **LINE 身分綁定與用印檔案回傳（第三階段）**
 - [ ] 店家加入 LINE 官方帳號後，在聊天視窗輸入正確的申請編號+查詢碼可以完成綁定，並收到確認回覆

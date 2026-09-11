@@ -18,9 +18,12 @@ from firebase_admin import storage
 
 
 def _bucket():
-    bucket_name = os.environ.get("FIREBASE_STORAGE_BUCKET", "")
+    # 這個環境變數不能叫 FIREBASE_STORAGE_BUCKET——firebase deploy 會直接拒絕
+    # .env 裡任何以 FIREBASE_/X_GOOGLE_/EXT_/KIT_ 開頭的變數名稱（保留字首），
+    # 部署時實測到這個錯誤才改名，見 firebase/functions/.env。
+    bucket_name = os.environ.get("STORAGE_BUCKET_NAME", "")
     if not bucket_name:
-        raise RuntimeError("環境變數缺少 FIREBASE_STORAGE_BUCKET")
+        raise RuntimeError("環境變數缺少 STORAGE_BUCKET_NAME")
     return storage.bucket(bucket_name)
 
 

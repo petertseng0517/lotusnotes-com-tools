@@ -385,7 +385,7 @@ venv32\Scripts\python.exe store\generate_contracts.py
 STORE_PUBLIC_BASE_URL=https://hlm.tzuchi.com.tw/store
 ```
 
-**Cloud Functions 新增端點**（`firebase/functions/main.py`）：`apply`（公開，店家送出申請）、`application_status`（公開，查詢進度）、`download_file`（公開＋admin，下載店家自有合約書）、`admin_list_applications`／`admin_review_application`／`admin_mark_contract_ready`（admin-only，分別給 `apply_review.py`／`generate_contracts.py` 呼叫）。這是本專案第一次用到 **Firebase Storage**（店家上傳的自有合約書存在這裡，bucket 規則整個鎖死，只有 Admin SDK 能讀寫），`firebase/functions/.env` 需新增 `FIREBASE_STORAGE_BUCKET`。
+**Cloud Functions 新增端點**（`firebase/functions/main.py`）：`apply`（公開，店家送出申請）、`application_status`（公開，查詢進度）、`download_file`（公開＋admin，下載店家自有合約書）、`admin_list_applications`／`admin_review_application`／`admin_mark_contract_ready`（admin-only，分別給 `apply_review.py`／`generate_contracts.py` 呼叫）。這是本專案第一次用到 **Firebase Storage**（店家上傳的自有合約書存在這裡，bucket 規則整個鎖死，只有 Admin SDK 能讀寫），`firebase/functions/.env` 需新增 `STORAGE_BUCKET_NAME`（原本想叫 `FIREBASE_STORAGE_BUCKET`，但 `firebase deploy` 會拒絕 `.env` 裡以 `FIREBASE_` 開頭的變數名稱，實測部署失敗才改名）。
 
 **統一編號查證的已知限制**（`store/tax_id_lookup.py`，見 `sdd5.md` §4.10、§6）：「統編查公司名稱」（公司登記）實測免申請即可用；「商業統一編號查商號名稱」（商業/商號登記，特約商店裡更常見的類型）實測需要向經濟部申請 IP 白名單才能用，這台機器目前還沒申請，`apply_review.py` 審核時會清楚顯示「查證功能未開通」，不會誤判成「查無登記資料」。
 
