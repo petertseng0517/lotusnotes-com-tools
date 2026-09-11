@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>查詢申請進度｜花蓮慈濟醫院特約商店查詢</title>
+<link rel="stylesheet" href="./style.css">
+<style>
+  .panel { max-width: 480px; margin: 32px auto; padding: 0 20px; }
+  .panel h2 { color: var(--primary); font-size: 1.1rem; margin: 0 0 10px; }
+  .panel p.hint { color: var(--muted); font-size: 0.88rem; margin: 0 0 20px; }
+  .query-box {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+  .query-box label { display: block; font-size: 0.88rem; color: var(--text); margin: 12px 0 4px; }
+  .query-box label:first-child { margin-top: 0; }
+  .query-box input[type=text] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 1rem;
+    background: #fff;
+    color: var(--text);
+  }
+  .query-box button {
+    width: 100%;
+    margin-top: 18px;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .query-box button:disabled { opacity: 0.6; cursor: default; }
+  .query-box button:hover:not(:disabled) { background: var(--primary-hover); }
+  .form-msg { margin-top: 12px; font-size: 0.88rem; }
+  .form-msg.error { color: #c0392b; }
+  .result-box {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+  .result-box .status-line { font-size: 1.15rem; font-weight: 700; color: var(--primary); margin-bottom: 8px; }
+  .result-box .store-name { color: var(--muted); margin-bottom: 12px; }
+  .result-box .note { font-size: 0.9rem; color: var(--text); margin-top: 10px; }
+  .result-box a.download {
+    display: inline-block;
+    margin-top: 14px;
+    padding: 10px 18px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>花蓮慈濟醫院特約商店查詢</h1>
+    <div class="rule"></div>
+    <div class="subtitle">查詢加入特約申請進度</div>
+  </header>
+  <nav class="tabs">
+    <a href="./index.html">特約查詢</a>
+    <a href="./join.html">加入特約</a>
+    <a href="./qa.html">Q&amp;A</a>
+  </nav>
+
+  <div id="query-view" class="panel">
+    <h2>查詢申請進度</h2>
+    <p class="hint">請輸入送出申請時取得的申請編號與查詢碼。</p>
+    <div class="query-box">
+      <label for="applicationId">申請編號</label>
+      <input type="text" id="applicationId" placeholder="例：20260909-03" autocomplete="off">
+      <label for="queryCode">查詢碼</label>
+      <input type="text" id="queryCode" placeholder="送出申請時取得的查詢碼" autocomplete="off">
+      <button id="query-submit">查詢</button>
+      <div id="query-msg" class="form-msg"></div>
+    </div>
+    <p class="hint" style="margin-top:16px;">查詢碼遺失的話，請透過 <a href="./join.html">加入特約</a> 頁面留的電話/Email 聯繫職工福利行政小組，我們可以用店名或統一編號協助查詢。</p>
+  </div>
+
+  <div id="result-view" class="panel" hidden>
+    <div class="result-box">
+      <div class="status-line" id="status-line"></div>
+      <div class="store-name" id="store-name"></div>
+      <div id="extra"></div>
+    </div>
+    <p class="hint" style="margin-top:16px;"><a href="javascript:void(0)" id="back-link">重新查詢</a></p>
+  </div>
+
+  <footer>
+    <div>職工福利行政小組</div>
+  </footer>
+
+<script>
+const FUNCTIONS_BASE_URL = "__FUNCTIONS_BASE_URL__";
+
+const STATUS_LABELS = {
+  pending: "審核中",
+  approved: "已核准，合約製作中",
+  rejected: "很抱歉，本次申請未通過",
+  contract_ready: "合約已產生，可以下載",
+  merchant_signed: "已收到您回傳的用印文件，等待本院用印",
+  completed: "雙方用印完成",
+  abandoned: "本案已結案",
+};
+
+function show(id) { document.getElementById(id).hidden = false; }
+function hide(id) { document.getElementById(id).hidden = true; }
+
+async function submitQuery() {
+  const applicationId = document.getElementById("applicationId").value.trim();
+  const queryCode = document.getElementById("queryCode").value.trim();
+  const msg = document.getElementById("query-msg");
+  const btn = document.getElementById("query-submit");
+
+  if (!applicationId || !queryCode) {
+    msg.textContent = "請輸入申請編號與查詢碼";
+    msg.className = "form-msg error";
+    return;
+  }
+
+  btn.disabled = true;
+  msg.textContent = "查詢中…";
+  msg.className = "form-msg";
+
+  try {
+    const res = await fetch(`${FUNCTIONS_BASE_URL}/application_status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ applicationId, queryCode }),
+    });
+    let body;
+    try { body = await res.json(); } catch (e) { body = null; }
+
+    if (body && body.ok) {
+      renderResult(body, applicationId, queryCode);
+      hide("query-view");
+      show("result-view");
+    } else {
+      msg.textContent = "查無資料，請確認申請編號與查詢碼是否正確";
+      msg.className = "form-msg error";
+    }
+  } catch (err) {
+    msg.textContent = `連線失敗，請稍後再試。（${err.message || err}）`;
+    msg.className = "form-msg error";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderResult(data, applicationId, queryCode) {
+  document.getElementById("status-line").textContent = STATUS_LABELS[data.status] || data.status;
+  document.getElementById("store-name").textContent = data.storeName;
+
+  const extra = document.getElementById("extra");
+  extra.innerHTML = "";
+
+  if (data.status === "rejected" && data.reviewNote) {
+    const note = document.createElement("div");
+    note.className = "note";
+    note.textContent = `說明：${data.reviewNote}`;
+    extra.appendChild(note);
+  }
+
+  if (data.status === "contract_ready") {
+    const url = data.contractSource === "own_template"
+      ? `${FUNCTIONS_BASE_URL}/download_file?applicationId=${encodeURIComponent(applicationId)}&queryCode=${encodeURIComponent(queryCode)}&kind=own_template`
+      : data.contractUrl;
+    if (url) {
+      const a = document.createElement("a");
+      a.className = "download";
+      a.href = url;
+      a.textContent = "下載合約 PDF";
+      a.target = "_blank";
+      a.rel = "noopener";
+      extra.appendChild(a);
+    }
+  }
+}
+
+document.getElementById("query-submit").addEventListener("click", submitQuery);
+document.getElementById("back-link").addEventListener("click", () => {
+  hide("result-view");
+  show("query-view");
+});
+</script>
+</body>
+</html>

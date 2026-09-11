@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>線上申請加入特約｜花蓮慈濟醫院特約商店查詢</title>
+<link rel="stylesheet" href="./style.css">
+<style>
+  /* 這個頁面專屬的樣式，共用樣式都在 ./style.css（sdd3.md 規定不能動那個檔案） */
+  .form-wrap { max-width: 640px; margin: 24px auto 60px; padding: 0 20px; }
+  .form-wrap h2 { color: var(--primary); font-size: 1.1rem; margin: 28px 0 10px; }
+  .form-wrap h2:first-child { margin-top: 0; }
+  .form-wrap p.hint { color: var(--muted); font-size: 0.88rem; margin: 0 0 16px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 0.9rem; color: var(--text); margin-bottom: 4px; font-weight: 600; }
+  .field .sub { font-weight: 400; color: var(--muted); font-size: 0.82rem; }
+  .field input[type=text], .field input[type=email], .field input[type=file], .field textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 1rem;
+    background: #fff;
+    color: var(--text);
+    font-family: inherit;
+  }
+  .field textarea { resize: vertical; min-height: 80px; }
+  .field input:focus, .field textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(3, 69, 191, 0.15);
+  }
+  .source-choice { display: flex; gap: 12px; margin-bottom: 4px; }
+  .source-choice label {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+  }
+  .source-choice input { margin-right: 6px; }
+  .source-choice label.selected { border-color: var(--primary); background: var(--primary-light); color: var(--primary); }
+  #own-template-field { display: none; }
+  .consent-box {
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 0.82rem;
+    line-height: 1.7;
+    color: var(--muted);
+    background: #fafbfc;
+    margin-bottom: 10px;
+    white-space: pre-line;
+  }
+  .consent-check { display: flex; align-items: flex-start; gap: 8px; font-size: 0.9rem; }
+  .consent-check input { margin-top: 3px; }
+  .honeypot { position: absolute; left: -9999px; top: -9999px; }
+  .submit-btn {
+    width: 100%;
+    margin-top: 20px;
+    padding: 13px;
+    border: none;
+    border-radius: 8px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 1.05rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .submit-btn:disabled { opacity: 0.6; cursor: default; }
+  .submit-btn:hover:not(:disabled) { background: var(--primary-hover); }
+  .form-msg { margin-top: 12px; font-size: 0.9rem; }
+  .form-msg.error { color: #c0392b; }
+  .result-box {
+    border: 1px solid var(--accent);
+    background: var(--primary-light);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+  }
+  .result-box .code { font-size: 1.6rem; font-weight: 700; color: var(--primary); letter-spacing: 0.05em; margin: 6px 0; }
+  .result-box a { color: var(--primary); font-weight: 600; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>花蓮慈濟醫院特約商店查詢</h1>
+    <div class="rule"></div>
+    <div class="subtitle">感恩特約商店支持，讓愛與感恩延續</div>
+  </header>
+  <nav class="tabs">
+    <a href="./index.html">特約查詢</a>
+    <a href="./join.html" class="active">加入特約</a>
+    <a href="./qa.html">Q&amp;A</a>
+  </nav>
+
+  <div class="form-wrap">
+
+    <div id="form-view">
+      <h2>線上申請加入特約</h2>
+      <p class="hint">請填寫以下資訊送出申請，職工福利行政小組審核通過後，會依您選擇的合約來源產生（或直接採用）合約書供您下載列印用印。若不方便使用線上表單，也歡迎透過 <a href="./join.html">加入特約</a> 頁面留的電話/Email 聯繫我們。</p>
+
+      <form id="apply-form">
+        <h2>合約來源</h2>
+        <div class="source-choice">
+          <label id="label-hospital"><input type="radio" name="contractSource" value="hospital_template" checked> 使用慈濟醫院合約範本</label>
+          <label id="label-own"><input type="radio" name="contractSource" value="own_template"> 使用店家制式範本</label>
+        </div>
+        <div class="field" id="own-template-field">
+          <label for="ownTemplateFile">請上傳貴店家的合約書檔案 <span class="sub">（PDF 或 Word，10MB 以內）</span></label>
+          <input type="file" id="ownTemplateFile" name="ownTemplateFile" accept=".pdf,.doc,.docx">
+        </div>
+
+        <h2>店家資訊</h2>
+        <div class="field">
+          <label for="storeName">店名</label>
+          <input type="text" id="storeName" name="storeName" required maxlength="200">
+        </div>
+        <div class="field">
+          <label for="ownerName">負責人姓名</label>
+          <input type="text" id="ownerName" name="ownerName" required maxlength="200">
+        </div>
+        <div class="field">
+          <label for="taxId">統一編號 <span class="sub">（8 碼數字）</span></label>
+          <input type="text" id="taxId" name="taxId" required pattern="\d{8}" inputmode="numeric" maxlength="8">
+        </div>
+        <div class="field">
+          <label for="address">地址</label>
+          <input type="text" id="address" name="address" required maxlength="200">
+        </div>
+        <div class="field">
+          <label for="phone">聯絡電話</label>
+          <input type="text" id="phone" name="phone" required maxlength="200">
+        </div>
+        <div class="field">
+          <label for="email">聯絡 Email</label>
+          <input type="email" id="email" name="email" required maxlength="200">
+        </div>
+        <div class="field">
+          <label for="contactPerson">聯絡人 <span class="sub">（若非負責人本人，選填）</span></label>
+          <input type="text" id="contactPerson" name="contactPerson" maxlength="200">
+        </div>
+        <div class="field">
+          <label for="businessCategory">營業類別</label>
+          <input type="text" id="businessCategory" name="businessCategory" required maxlength="200" placeholder="例：餐飲、美容美髮、3C 通訊…">
+        </div>
+        <div class="field">
+          <label for="discountContent">希望提供的優惠內容</label>
+          <textarea id="discountContent" name="discountContent" required maxlength="2000"></textarea>
+        </div>
+        <div class="field">
+          <label for="note">其他備註 <span class="sub">（選填）</span></label>
+          <textarea id="note" name="note" maxlength="2000"></textarea>
+        </div>
+
+        <div class="field honeypot" aria-hidden="true">
+          <label for="website">網站</label>
+          <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+        </div>
+
+        <h2>個人資料蒐集告知</h2>
+        <div class="consent-box">為配合「特約商店加入申請暨合約簽訂」作業，佛教慈濟醫療財團法人花蓮慈濟醫院（以下簡稱本院）依「個人資料保護法」第八條規定，向您告知下列事項：
+
+一、蒐集之目的：本院職工福利行政小組為審核貴店家／公司加入本院特約商店之資格、辦理特約合約之簽訂與履行、聯繫合約相關事宜（包含優惠內容確認、合約用印往返、合約續約或終止通知等），需蒐集下列個人資料。
+
+二、蒐集之個人資料類別：負責人姓名、聯絡人姓名、聯絡電話、聯絡 Email，及與貴事業相關之統一編號、地址等資料。
+
+三、個人資料利用之期間、地區、對象及方式：期間自蒐集之日起至特約合約關係終止後，依本院文書保存年限規定之期間止；地區為中華民國境內；對象為本院職工福利行政小組及依合約履行需要之相關承辦人員，非依法令規定或經您同意，不會提供予其他第三人；方式為電子化資料及紙本合約文件儲存與利用。
+
+四、當事人權利：依個人資料保護法第三條規定，您得行使查詢或請求閱覽、請求製給複製本、請求補充或更正、請求停止蒐集處理利用、請求刪除等權利，請透過本頁面聯絡方式與本院職工福利行政小組聯繫。
+
+五、不提供個人資料之影響：上述個人資料為審核加入特約商店及簽訂合約所必需，若您選擇不提供或提供不完整，本院將無法進行後續審核及合約簽訂作業。</div>
+        <label class="consent-check">
+          <input type="checkbox" id="consentPersonalData" name="consentPersonalData" required>
+          我已詳閱並瞭解上述告知事項，同意本院依上述目的蒐集、處理及利用我所填寫之個人資料。
+        </label>
+
+        <button type="submit" class="submit-btn" id="submit-btn">送出申請</button>
+        <div id="form-msg" class="form-msg"></div>
+      </form>
+    </div>
+
+    <div id="result-view" hidden>
+      <div class="result-box">
+        <p>申請已送出，請截圖或抄下以下資訊，之後查詢審核進度需要用到：</p>
+        <div>申請編號</div>
+        <div class="code" id="result-id"></div>
+        <div>查詢碼</div>
+        <div class="code" id="result-code"></div>
+        <p><a href="./apply_status.html">前往查詢申請進度</a></p>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>
+    <div>職工福利行政小組</div>
+  </footer>
+
+<script>
+const FUNCTIONS_BASE_URL = "__FUNCTIONS_BASE_URL__";
+
+const FIELD_LABELS = {
+  storeName: "店名", ownerName: "負責人姓名", taxId: "統一編號", address: "地址",
+  phone: "聯絡電話", email: "聯絡 Email", contactPerson: "聯絡人",
+  businessCategory: "營業類別", discountContent: "優惠內容", note: "備註",
+};
+
+const ERROR_MESSAGES = {
+  invalid_tax_id: "統一編號格式不正確，請輸入 8 碼數字",
+  invalid_contract_source: "請選擇合約來源",
+  consent_required: "請詳閱並勾選個人資料蒐集告知同意",
+  missing_own_template_file: "請上傳店家的合約書檔案",
+  invalid_file_type: "檔案格式不支援，請上傳 PDF 或 Word 檔",
+  file_too_large: "檔案太大，請控制在 10MB 以內",
+  rate_limited: "您送出的次數已達今日上限，請明天再試，或改用電話/Email 聯繫我們",
+  method_not_allowed: "系統忙碌，請稍後再試",
+};
+
+function errorMessage(code) {
+  if (ERROR_MESSAGES[code]) return ERROR_MESSAGES[code];
+  const m = /^missing_(.+)$/.exec(code);
+  if (m && FIELD_LABELS[m[1]]) return `請填寫「${FIELD_LABELS[m[1]]}」`;
+  const m2 = /^(.+)_too_long$/.exec(code);
+  if (m2 && FIELD_LABELS[m2[1]]) return `「${FIELD_LABELS[m2[1]]}」內容過長`;
+  return `送出失敗（${code || "未知錯誤"}），請稍後再試`;
+}
+
+const sourceRadios = document.querySelectorAll('input[name=contractSource]');
+function updateSourceUI() {
+  const value = document.querySelector('input[name=contractSource]:checked').value;
+  document.getElementById("own-template-field").style.display = value === "own_template" ? "block" : "none";
+  document.getElementById("ownTemplateFile").required = value === "own_template";
+  document.getElementById("label-hospital").classList.toggle("selected", value === "hospital_template");
+  document.getElementById("label-own").classList.toggle("selected", value === "own_template");
+}
+sourceRadios.forEach(r => r.addEventListener("change", updateSourceUI));
+updateSourceUI();
+
+document.getElementById("apply-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById("submit-btn");
+  const msg = document.getElementById("form-msg");
+  const form = e.target;
+  const contractSource = form.contractSource.value;
+
+  btn.disabled = true;
+  msg.textContent = "送出中…";
+  msg.className = "form-msg";
+
+  try {
+    let res;
+    if (contractSource === "own_template") {
+      const formData = new FormData(form);
+      formData.set("consentPersonalData", form.consentPersonalData.checked ? "true" : "false");
+      res = await fetch(`${FUNCTIONS_BASE_URL}/apply`, { method: "POST", body: formData });
+    } else {
+      const payload = {};
+      new FormData(form).forEach((value, key) => {
+        if (key === "ownTemplateFile") return;
+        payload[key] = value;
+      });
+      payload.consentPersonalData = form.consentPersonalData.checked;
+      res = await fetch(`${FUNCTIONS_BASE_URL}/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    }
+
+    let body;
+    try { body = await res.json(); } catch (err) { body = null; }
+
+    if (body && body.ok) {
+      document.getElementById("result-id").textContent = body.applicationId;
+      document.getElementById("result-code").textContent = body.queryCode;
+      document.getElementById("form-view").hidden = true;
+      document.getElementById("result-view").hidden = false;
+    } else {
+      msg.textContent = errorMessage(body && body.error);
+      msg.className = "form-msg error";
+      btn.disabled = false;
+    }
+  } catch (err) {
+    msg.textContent = `連線失敗，請稍後再試。（${err.message || err}）`;
+    msg.className = "form-msg error";
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
