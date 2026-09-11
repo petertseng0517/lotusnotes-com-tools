@@ -23,6 +23,9 @@
     28 乙方「聯絡人：」        → 聯絡人
     29 乙方「聯絡電話：」      → 電話
     32 「中華民國 年 月 日」   → 簽約日期
+    7~10（處理完以上所有段落後，最後一步刪除）→ 原本紙本表單留給人工手寫優惠內容
+      的空白行，優惠內容已自動套版後變成多餘空白，會把版面往下擠、簽約日期可能被
+      擠到自己獨占一頁，見 sdd5.md §4.5.1（2026-09-11 依實際套版結果調整）
 
 **只需要執行一次**（`python prepare_contract_template.py`）；`store/template-store.doc`
 之後如果改版，重跑前建議先用 Word 打開比對段落內容有沒有變，變了的話上面這份對照
@@ -96,7 +99,10 @@ def main():
     doc = word.Documents.Open(SOURCE_PATH)
     try:
         _replace_in_paragraph(doc, 4, "（以下簡稱乙方）", "{{store_name}}（以下簡稱乙方）")
-        _replace_in_paragraph(doc, 6, "乙方提供以下優惠：", "乙方提供以下優惠：{{discount_content}}")
+        # 優惠內容前面加一個段落內換行（\x0b，不是段落結尾的 \r，不會影響後面段落編號），
+        # 讓條列式優惠內容從下一行開始，不會跟「乙方提供以下優惠：」擠在同一行
+        # （2026-09-11 依實際套版結果調整，見 sdd5.md §4.5.1）。
+        _replace_in_paragraph(doc, 6, "乙方提供以下優惠：", "乙方提供以下優惠：\x0b{{discount_content}}")
         _replace_sequence_in_paragraph(doc, 15, [
             ("年", "{{start_y}}年"), ("月", "{{start_m}}月"), ("日", "{{start_d}}日"),
             ("年", "{{end_y}}年"), ("月", "{{end_m}}月"), ("日", "{{end_d}}日"),
@@ -112,6 +118,15 @@ def main():
         _replace_sequence_in_paragraph(doc, 32, [
             ("年", "{{sign_y}}年"), ("月", "{{sign_m}}月"), ("日", "{{sign_d}}日"),
         ])
+
+        # 段落 7~10 是原本紙本表單留給人工手寫優惠內容的空白行，現在優惠內容已經自動
+        # 套版（且本身就能多行條列呈現，見上面段落 6 的調整），這幾行變成多餘的空白，
+        # 條列項目多或店名較長時會把版面往下擠、導致簽約日期被擠到自己獨占一頁
+        # （2026-09-11 依實際套版結果調整）。刪除必須放在所有段落編號操作的最後
+        # 一步——刪除會讓後面的段落編號往前移，先做的話會打亂上面幾行的段落編號。
+        start = doc.Paragraphs(7).Range.Start
+        end = doc.Paragraphs(10).Range.End
+        doc.Range(start, end).Delete()
 
         doc.SaveAs2(OUTPUT_PATH, FileFormat=WD_FORMAT_DOCUMENT)
         print(f"已產生範本：{OUTPUT_PATH}")
